@@ -1,0 +1,50 @@
+name: release-flow
+
+on: [workflow_dispatch]
+
+jobs:
+  check_workflow_job:
+    name: Workflow of running tests and linter
+    uses: ./.github/workflows/check-flow.yml
+  
+  release_branch:
+    needs: check_workflow_job
+    name: Creation of release branch
+    runs-on: ubuntu-latest
+    steps:
+      - uses: peterjgrainger/action-create-branch@v2.2.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          branch: releases/${{ github.run_number }}
+
+  build_docker_images:
+    name: Building Docker images for Yandex Cloud
+    needs: release_branch
+    runs-on: ubuntu-latest
+    steps:
+      - run: docker build . -t cr.yandex/fv4tlb2bj3g27tl2qguu/app:${{ github.run_number }}
+      - run: docker build . -t cr.yandex/fv4tlb2bj3g27tl2qguu/app:${{ github.run_number }}_latest
+
+  load_docker_images_to_cr:
+    name: Loading docker images to Yandex Cloud Registry
+    needs: build_docker_images
+    runs-on: ubuntu-latest
+    steps:
+      - run: docker push -t cr.yandex/fv4tlb2bj3g27tl2qguu/app:${{ github.run_number }}
+      - run: docker push -t cr.yandex/fv4tlb2bj3g27tl2qguu/app:${{ github.run_number }}_latest
+  
+  git_tag:
+    name: Creation of git tag of last commit in main branch
+    needs: load_docker_images_to_cr
+    runs-on: ubuntu-latest
+    steps:
+      - run: git tag ${{ github.run_number }}
+
+  issue:
+    name: Creation of issue
+    needs: git_tag
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "CURRENT_DATE=$(date +%Y%m%d%H%M)" >> $GITHUB_ENV 
+      - run: gh issue create --title "Realese ${{ github.run_number }}" --body "date -- ${{ env.CURRENT_DATE }}; author -- ${{github.actor}}; version number -- ${{github.run_number}}; docker-image -- cr.yandex/fv4tlb2bj3g27tl2qguu/app:${{ github.run_number }}"
